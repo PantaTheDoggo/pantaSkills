@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:subscription.packtpub.com)",
+      "WebFetch(domain:dokumen.pub)",
+      "WebFetch(domain:tpbabparn.medium.com)"
+    ]
+  }
+}

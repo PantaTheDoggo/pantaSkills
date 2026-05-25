@@ -3,7 +3,20 @@
     "allow": [
       "WebFetch(domain:subscription.packtpub.com)",
       "WebFetch(domain:dokumen.pub)",
-      "WebFetch(domain:tpbabparn.medium.com)"
+      "WebFetch(domain:tpbabparn.medium.com)",
+      "Read(//c/Users/panta/.claude/projects/d--Skillstore/memory/**)",
+      "Read(//c/Users/panta/**)",
+      "Read(//d//**)",
+      "WebSearch",
+      "WebFetch(domain:support.claude.com)",
+      "WebFetch(domain:portkey.ai)",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:claude.com)",
+      "WebFetch(domain:duet.so)",
+      "Bash(rm \"d:\\\\Skillstore\\\\D:Skillstorech1_raw.txt\")"
+    ],
+    "additionalDirectories": [
+      "d:\\Skillstore"
     ]
   }
 }

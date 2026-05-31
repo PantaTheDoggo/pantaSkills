@@ -1,0 +1,196 @@
+# Blueprint — OCR de Mangá (Japonês)
+
+> Versão dedicada ao **japonês**. Sem roteamento de idioma: um único backend
+> (`manga-ocr`) e ordem de leitura fixa de mangá (direita→esquerda,
+> cima→baixo). Documento de arquitetura para implementação por um agente —
+> contratos das classes com docstrings, entradas e saídas, **sem implementar**.
+
+---
+
+## 1. Objetivo
+
+Pasta com scans (PNG, JPG, WEBP) → varre em ordem natural → gera um **TSV** onde
+a coluna 1 é o nome do arquivo e as colunas seguintes são os trechos de texto da
+página, na ordem de leitura **da direita para a esquerda, de cima para baixo**.
+
+## 2. Pipeline
+
+Detectar regiões de texto/balões → recortar → reconhecer com `manga-ocr`.
+Nunca passar a página inteira no OCR (narração, balões e SFX se misturariam).
+
+- **Detecção:** detector treinado em quadrinhos (YOLOv8/RT-DETR) ou
+  `comic-text-detector`. Agnóstico de idioma.
+- **OCR:** `manga-ocr` (kha-white) — feito para mangá: lê texto **vertical e
+  horizontal**, furigana, texto sobre a arte e **múltiplas linhas em um único
+  passe** (um balão inteiro de uma vez). Não tente des-rotacionar colunas
+  verticais manualmente: o modelo já trata.
+
+**Dependências:** `Pillow`, `numpy`, `opencv-python`, `manga-ocr`,
+`ultralytics` (ou o pacote do detector), `natsort`.
+
+## 3. Fluxo de execução
+
+```
+1. Carregar PipelineConfig (pasta entrada, saída, modelo detector).
+2. FolderScanner.scan() -> caminhos ordenados naturalmente.
+3. Instanciar 1x: BubbleDetector, MangaOCR, MangaReadingSorter, PageProcessor, TableWriter.
+4. Para cada imagem:
+     trechos = PageProcessor.process(caminho)   # detect -> sort -> OCR
+     TableWriter.add_row(nome, trechos)          # flush por linha
+5. TableWriter.close(); logar resumo.
+```
+
+`PageProcessor.process`: imagem → `detect()` (bbox) → `sort()` (RTL/TTB) →
+crop + `recognize()` por região → lista de trechos não-vazios.
+
+## 4. Saída
+
+TSV (`\t`), linhas de largura variável (cada página tem nº de trechos diferente):
+
+```
+pagina_001.png	右から左へ	次の吹き出し	ナレーション
+pagina_002.png	セリフ	効果音
+```
+
+## 5. Classes (contratos)
+
+```python
+"""ocr_manga_ja.py — OCR de scans de mangá (japonês) para TSV."""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
+
+
+@dataclass
+class PipelineConfig:
+    """Configuração única da execução.
+
+    input_dir:      pasta com as imagens.
+    output_path:    caminho do .tsv de saída.
+    extensions:     extensões aceitas (default: .png .jpg .jpeg .webp).
+    row_band_ratio: tolerância vertical (fração da altura) para agrupar regiões
+                    na mesma "linha" antes de ordenar (default ~0.04).
+    min_confidence: confiança mínima para manter uma detecção.
+    detector_model: id/caminho do modelo de detecção de balões.
+    """
+    input_dir: Path
+    output_path: Path
+    extensions: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp")
+    row_band_ratio: float = 0.04
+    min_confidence: float = 0.3
+    detector_model: str = "ogkalu/comic-speech-bubble-detector-yolov8m"
+
+
+@dataclass
+class TextRegion:
+    """Região de texto numa página.
+
+    bbox:       (x1, y1, x2, y2) em pixels.
+    confidence: confiança da detecção (0–1).
+    text:       texto reconhecido; vazio até o OCR rodar.
+    cx, cy:     centro da bbox (para ordenação).
+    """
+    bbox: tuple[int, int, int, int]
+    confidence: float = 1.0
+    text: str = ""
+
+    @property
+    def cx(self) -> float: ...
+    @property
+    def cy(self) -> float: ...
+
+
+class FolderScanner:
+    """Lista as imagens da pasta em ordem natural (pagina_2 < pagina_10)."""
+
+    def __init__(self, config: PipelineConfig) -> None: ...
+
+    def scan(self) -> list[Path]:
+        """Saída: list[Path] filtrada por extensão, não-recursiva, sem ocultos."""
+        ...
+
+
+class BubbleDetector:
+    """Localiza regiões de texto/balões. Modelo carregado 1x no __init__."""
+
+    def __init__(self, config: PipelineConfig) -> None: ...
+
+    def detect(self, image) -> list[TextRegion]:
+        """Entrada: imagem carregada. Saída: regiões (bbox+confidence), text=''.
+        Filtra por config.min_confidence."""
+        ...
+
+
+class MangaOCR:
+    """Wrapper de manga-ocr. Modelo carregado 1x no __init__."""
+
+    def __init__(self) -> None: ...
+
+    def recognize(self, crop) -> str:
+        """Entrada: recorte de uma região. Saída: texto (vazio se ilegível).
+        Lida nativamente com texto vertical, horizontal e furigana."""
+        ...
+
+
+class MangaReadingSorter:
+    """Ordena as regiões na leitura de mangá: direita→esquerda, cima→baixo.
+
+    Agrupa regiões em faixas horizontais por cy (tolerância =
+    row_band_ratio * altura); faixas de cima p/ baixo; dentro da faixa, cx
+    decrescente (direita p/ esquerda).
+    """
+
+    def __init__(self, config: PipelineConfig) -> None: ...
+
+    def sort(self, regions: Sequence[TextRegion], page_height: int) -> list[TextRegion]:
+        """Entrada: regiões + altura da página. Saída: nova lista ordenada."""
+        ...
+
+
+class PageProcessor:
+    """Processa UMA página: detectar -> ordenar -> OCR por região."""
+
+    def __init__(self, detector: BubbleDetector, sorter: MangaReadingSorter, ocr: MangaOCR) -> None: ...
+
+    def process(self, image_path: Path) -> list[str]:
+        """Entrada: caminho da imagem. Saída: trechos em ordem de leitura (sem vazios)."""
+        ...
+
+
+class TableWriter:
+    """Grava o TSV incrementalmente; linhas de largura variável."""
+
+    def __init__(self, output_path: Path, delimiter: str = "\t") -> None: ...
+
+    def add_row(self, filename: str, segments: Sequence[str]) -> None:
+        """Escreve [nome, trecho_1, trecho_2, ...] e dá flush."""
+        ...
+
+    def close(self) -> None: ...
+
+
+class MangaPipeline:
+    """Orquestrador de alto nível."""
+
+    def __init__(self, config: PipelineConfig) -> None:
+        """Instancia 1x detector, OCR, sorter, processor e writer."""
+        ...
+
+    def run(self) -> Path:
+        """scan -> loop (process + add_row) -> close. Saída: Path do TSV."""
+        ...
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI: lê args, monta config, executa MangaPipeline.run(). Retorna 0 = ok."""
+    ...
+```
+
+## 6. Atenção
+
+1. Carregue detector e `manga-ocr` **uma vez** e reutilize.
+2. Recorte com folga (~5–10 px) ao redor da bbox antes do OCR.
+3. Ordenação consciente de painéis é refinamento opcional — fora do caminho
+   principal para manter enxuto.
